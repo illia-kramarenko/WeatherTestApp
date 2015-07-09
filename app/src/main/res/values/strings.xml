@@ -1,0 +1,13 @@
+<resources>
+    <string name="app_name">WeatherTestApp</string>
+    <string name="title_activity_main">WeatherTestApp</string>
+
+    <string name="country">Country</string>
+    <string name="city">City</string>
+    <string name="temp">Temp</string>
+    <string name="wind">Wind</string>
+    <string name="humidity">Humidity</string>
+
+    <string name="action_search">Search</string>
+    <string name="hint">Enter city name</string>
+</resources>
