@@ -3,16 +3,16 @@ package com.kramarenko.illia.weathertestapp;
 import android.content.Context;
 import android.net.ConnectivityManager;
 import android.net.NetworkInfo;
-import android.os.AsyncTask;
 import android.os.Bundle;
 import android.os.IBinder;
 import android.support.v7.app.AppCompatActivity;
-import android.view.inputmethod.InputMethodManager;
-import android.widget.SearchView;
+import android.text.TextUtils;
 import android.util.Log;
 import android.view.Menu;
 import android.view.MenuInflater;
+import android.view.inputmethod.InputMethodManager;
 import android.widget.ImageView;
+import android.widget.SearchView;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -22,56 +22,37 @@ import com.google.android.gms.maps.OnMapReadyCallback;
 import com.google.android.gms.maps.SupportMapFragment;
 import com.google.android.gms.maps.model.LatLng;
 import com.google.android.gms.maps.model.MarkerOptions;
+import com.jakewharton.rxbinding.widget.RxSearchView;
 import com.koushikdutta.ion.Ion;
-import com.kramarenko.illia.weathertestapp.retrofit.WeatherData;
-import com.kramarenko.illia.weathertestapp.retrofit.WeatherWebServiceProxy;
+import com.kramarenko.illia.weathertestapp.api.ApiService;
+import com.kramarenko.illia.weathertestapp.api.WeatherData;
 
-import retrofit.RestAdapter;
+import java.util.concurrent.TimeUnit;
+
+import rx.Subscription;
+import rx.android.schedulers.AndroidSchedulers;
+import rx.schedulers.Schedulers;
 
 public class MainActivity extends AppCompatActivity implements OnMapReadyCallback {
 
     protected final String TAG = getClass().getSimpleName();
-    /**
-     *  Displays icon according to weather data
-     */
     private ImageView mIconView;
 
     private final String imageURLbase =
             "http://api.openweathermap.org/img/w/";
 
-    /**
-     *  Displays received weather data:
-     */
-    // Country
     private TextView mCountry;
-    // City
     private TextView mCity;
-    // Temperature
     private TextView mTemp;
-    // Wind
     private TextView mWind;
-    // Humidity
     private TextView mHumidity;
-    // Weather description
     private TextView mWeather;
-
-    // Celsius unicode symbol
     final String DEGREE_CEL  = "\u2103";
-
-    // Google map object
     private GoogleMap mMap;
-
-    // Retrofit proxy for making GET request
-    private WeatherWebServiceProxy mWeatherWebServiceProxy;
-
-    // Weather data gathered from open weather map web-service
     private WeatherData mWeatherData;
-
-    // Warning message
     private final String INVALID_INPUT = "Invalid input";
-
-    // Location
     private String location = "";
+    private Subscription sub;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -80,16 +61,6 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
 
         // initialize views
         initViews();
-
-        // Build the RetroFit RestAdapter, which is used to create
-        // the RetroFit service instance, and then use it to build
-        // the RetrofitWeatherServiceProxy.
-        mWeatherWebServiceProxy =
-                new RestAdapter.Builder()
-                        .setEndpoint(WeatherWebServiceProxy.sWeather_Service_URL)
-                        .build()
-                        .create(WeatherWebServiceProxy.class);
-
     }
 
     // Initialize views
@@ -112,68 +83,39 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
         final SearchView searchView =
                 (SearchView) menu.findItem(R.id.search).getActionView();
         searchView.setQueryHint(getString(R.string.hint));
-        searchView.setOnQueryTextListener(new SearchView.OnQueryTextListener() {
-            @Override
-            public boolean onQueryTextSubmit(String s) {
-                if(!s.isEmpty()) {
-                    hideKeyboard(MainActivity.this, searchView.getWindowToken());
-                    location = s;
-                    lookUpForWeather();
-                } else {
-                    // never actually been here...
-                    Toast.makeText(MainActivity.this, INVALID_INPUT, Toast.LENGTH_SHORT).show();
-                }
-                return false;
-            }
-            @Override
-            public boolean onQueryTextChange(String s) {
-                return false;
-            }
-        });
+
+        RxSearchView.queryTextChanges(searchView)
+                .debounce(700, TimeUnit.MILLISECONDS)
+                .filter(cs -> !TextUtils.isEmpty(cs))
+                .filter(cs -> isOnline())
+                .map(CharSequence::toString)
+                .subscribe(this::makeCall);
+
         return true;
     }
 
-
-    // Look up for weather, set up map and set the location
-    private void lookUpForWeather(){
-        // Check if internet connection is OK
-        if(isOnline()) {
-            new AsyncTask<String, Void, WeatherData>() {
-                @Override
-                protected WeatherData doInBackground(String... location) {
-                    WeatherData wd = mWeatherWebServiceProxy.getWeatherData(location[0]);
-                    if (wd != null) {
-                        Log.d(TAG, "Weather data is OK");
-                        return wd;
-                    } else {
-                        Log.d(TAG, "Weather data not found for this location");
-                        return new WeatherData();
-                    }
-                }
-                @Override
-                protected void onPostExecute(WeatherData result) {
-                    mWeatherData = result;
-                    setResults();
-                }
-            }.execute(location);
-        } else {
-            Toast.makeText(this, "No internet connection", Toast.LENGTH_LONG).show();
-        }
+    private void makeCall(String s) {
+        location = s;
+        Log.d("### Call ###", ">>>>>>>>>>>>>> call made: " + s);
+        sub = ApiService.getService().getWeather(s, ApiService.APP_ID)
+                .subscribeOn(Schedulers.io())
+                .observeOn(AndroidSchedulers.mainThread())
+                .subscribe(this::setResults, this::onError);
     }
 
-    // Format and Set weather results on display
-    public void setResults(){
+    public void setResults(WeatherData _w){
+        mWeatherData = _w;
         if(mWeatherData != null) {
             setUpMapIfNeeded();
 
-            mCountry.setText(mWeatherData.getSys().getCountry());
-            mCity.setText(mWeatherData.getName());
-            mTemp.setText(Math.round(mWeatherData.getMain().getTemp()) + DEGREE_CEL);
-            mWind.setText(mWeatherData.getWind().getSpeed() + " m/s " + calcWindDirection(mWeatherData.getWind().getDeg()));
-            mHumidity.setText(String.valueOf(mWeatherData.getMain().getHumidity()) + "%");
-            mWeather.setText(Character.toUpperCase(mWeatherData.getWeathers().get(0).getDescription().charAt(0))
-                    + mWeatherData.getWeathers().get(0).getDescription().substring(1));
-            String iconName = mWeatherData.getWeathers().get(0).getIcon();
+            mCountry.setText(_w.getSys().getCountry());
+            mCity.setText(_w.getName());
+            mTemp.setText(Math.round(_w.getMain().getTemp()) + DEGREE_CEL);
+            mWind.setText(_w.getWind().getSpeed() + " m/s " + calcWindDirection(_w.getWind().getDeg()));
+            mHumidity.setText(String.valueOf(_w.getMain().getHumidity()) + "%");
+            mWeather.setText(Character.toUpperCase(_w.getWeathers().get(0).getDescription().charAt(0))
+                    + _w.getWeathers().get(0).getDescription().substring(1));
+            String iconName = _w.getWeathers().get(0).getIcon();
 
             // Load appropriate icon with Ion library
             Ion.with(mIconView)
@@ -181,6 +123,11 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
         } else
             Log.d(TAG, "Weather data is null in PostExecute");
 
+    }
+
+    private void onError(Throwable t) {
+        Toast.makeText(this, "Something BAD happened", Toast.LENGTH_SHORT).show();
+        t.printStackTrace();
     }
 
     // Set up map if it not set yet
@@ -212,6 +159,7 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
         if(mWeatherData != null) {
             LatLng lating = new LatLng(mWeatherData.getCoord().getLat(),
                     mWeatherData.getCoord().getLon());
+            mMap.clear();
             mMap.addMarker(new MarkerOptions()
                     .position(lating)
                     .title(location));
@@ -255,10 +203,15 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
 
     // Helper method to check internet connection
     public boolean isOnline() {
-       ConnectivityManager cm =
+        ConnectivityManager cm =
                 (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
         NetworkInfo netInfo = cm.getActiveNetworkInfo();
-        return netInfo != null && netInfo.isConnectedOrConnecting();
+        if (netInfo != null && netInfo.isConnectedOrConnecting())
+            return true;
+        else {
+            Toast.makeText(this, "No Connection", Toast.LENGTH_SHORT).show();
+            return false;
+        }
 
     }
 

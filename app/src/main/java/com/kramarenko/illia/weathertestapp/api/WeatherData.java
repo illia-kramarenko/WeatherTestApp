@@ -1,4 +1,4 @@
-package com.kramarenko.illia.weathertestapp.retrofit;
+package com.kramarenko.illia.weathertestapp.api;
 
 import java.util.ArrayList;
 import java.util.List;
